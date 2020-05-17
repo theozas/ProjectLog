@@ -1,0 +1,115 @@
+/*
+Paulius Miliunas
+K9 firmware
+final yeare project
+*/
+
+
+#include <Arduino.h>
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEServer.h>
+
+#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+
+
+//int prs = 0;
+unsigned int tNow,tOld;//variables for timer counter
+float periodInSeconds,frequency,period,sum,averige,sample;
+static int devider = 1000000;//variable uset to convert us to ms
+int count = 0;
+int nSamples = 5;
+//int sum,averige,sample;
+void taskOne( void * parameter );
+
+TaskHandle_t taskOneHandle = NULL;
+hw_timer_t * timer = NULL;//creating variable of hw_timer_r type to hold setings
+portMUX_TYPE tMux = portMUX_INITIALIZER_UNLOCKED;//this will do sinc between main lop and ISR, vhen modifieng variable
+
+
+
+void IRAM_ATTR ISR() {//pin interupt hanler
+    portENTER_CRITICAL_ISR(&tMux);//disable all incoming interups
+    
+    tNow = micros();
+    period = tNow - tOld;//geting period betven this nad previus faling edge in us
+    tOld = tNow;
+    //Serial.printf("Now(%u)us: Before(%u)us: Interval(%f)us: Frequency (%f)hz: Period(%f)s\r", tNow, tOld, period, frequency, periodInSeconds);//testing
+    portEXIT_CRITICAL_ISR(&tMux);//enable ll  incoming interupts
+    xTaskResumeFromISR(taskOneHandle);
+    
+    
+}
+
+
+//this hapens ones
+void setup() {
+  Serial.begin(112500);  
+  timer = timerBegin(0,80,true);
+  tOld = 0;
+  attachInterrupt(T0,ISR,FALLING);//ataching interupt on pin 4 on esp (with arduino library pin 4 is pasked by T0)
+
+  xTaskCreate(taskOne,"TaskOne",10000,NULL,2,&taskOneHandle);//creating task 1 task will calculate frequency
+  // xTaskCreate(taskTwo,"TaskTwo",configMINIMAL_STACK_SIZE,NULL,1,NULL);//creating task 2
+  Serial.println("Starting BLE work!");
+
+  BLEDevice::init("eK9 transmiting");
+  BLEServer *pServer = BLEDevice::createServer();
+  BLEService *pService = pServer->createService(SERVICE_UUID);
+  BLECharacteristic *pCharacteristic = pService->createCharacteristic(
+                                         CHARACTERISTIC_UUID,
+                                         BLECharacteristic::PROPERTY_READ |
+                                         BLECharacteristic::PROPERTY_WRITE
+                                       );
+
+  pCharacteristic->setValue(frequency);
+  pService->start();
+  // BLEAdvertising *pAdvertising = pServer->getAdvertising();  // this still is working for backward compatibility
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->setScanResponse(true);
+  pAdvertising->setMinPreferred(0x06);  // functions that help with iPhone connections issue
+  pAdvertising->setMinPreferred(0x12);
+  BLEDevice::startAdvertising();
+  Serial.println("Characteristic defined! Now you can read it in your phone!\n");
+}
+//this hapens continueusle
+void loop() {
+  ///delay(1000);
+}
+
+//task one not used at the moment FreeRTOS component
+void taskOne( void * parameter ){   
+    for(;;){
+      
+      periodInSeconds = period/devider; //converting us to s
+      frequency = 1/periodInSeconds;
+      Serial.printf("Frequency (%f)hz\r", frequency);//testing. cats to  int to remove decimal point
+      
+      /*
+      sample = period;
+      if(count < nSamples){
+      sum += sample;
+      count++;
+    }else if(count == nSamples){
+      averige = sum/nSamples;
+      count = 0;
+      periodInSeconds = averige/devider; //converting us to s
+      frequency = 1/periodInSeconds;
+      Serial.printf("Frequency (%f)hz\r", frequency);//testing. cats to  int to remove decimal point
+
+    }*/
+      
+        
+        //periodInSeconds = averige/devider; //converting us to s
+        //frequency = 1/periodInSeconds;
+        //Serial.printf("Frequency (%f)hz\r", frequency);//testing
+      
+
+      
+      //pCharacteristic->setValue(frequency);
+      vTaskSuspend( NULL );
+    }
+ }
+
